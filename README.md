@@ -13,23 +13,20 @@ along with this userbot.
 
 ## Deploy to Heroku
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/callsmusic/tgvc-userbot/tree/smart-plugins)
+[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/callsmusic/tgvc-userbot/tree/dev)
 
 - Generate Pyrogram session string by
   running [generate-pyrogram-session-string.py](generate-pyrogram-session-string.py)
   by yourself or
   through [Replit](https://replit.com/@dashezup/generate-pyrogram-session-string)
 - Enable the worker after deploy the project to Heroku
-- send `!ping`, `!uptime`, or `!sysinfo` from userbot account itself or its
-  contacts to check if the userbot is running
-- Send `!join` to a voice chat enabled group chat from userbot account itself
-  or its contacts
-- Reply to an audio with `/play` to start playing it in the voice chat, every
-  member of the group can use the `!play` and other common commands now,
-  check `!help` for more commands
 
-Check [smart-plugins](https://github.com/callsmusic/tgvc-userbot/tree/smart-plugins)
-branch If you want to use `radio` or `recorder` plugin.
+Change the value of `PLUGIN` variable if you want to try other voice chat
+plugins.
+
+It's known that there are usually audio lagging issues on Heroku deployment of
+this project because Heroku provide very limited resources, in this case you
+can try some other platforms such like Qovery or self-hosting it.
 
 ## Introduction
 
@@ -42,15 +39,13 @@ branch If you want to use `radio` or `recorder` plugin.
 - Automatically pin the current playing track
 - Show current playing position of the audio
 
-**How to Use**
+**Plugin**: vc.`player`
 
-You can't play and listen in the same voice chat at the same time, it's
-recommended to run the userbot with your alt account and control the userbot
-with your main account by adding your main account as a contact of the alt
-account.
+Commands only works in groups, userbot account itself and contacts can use any
+commands, all members can use common commands after the userbot join the VC
 
 1. Start the userbot, try `!ping`, `!uptime` or `!sysinfo` command to check if
-   the bot was running.
+   the bot was running
 2. send `!join` to a voice chat enabled group chat from userbot account itself
    or its contacts, be sure to make the userbot account as group admin and give
    it at least the following permissions:
@@ -61,17 +56,24 @@ account.
    and `!help` now.
 4. check `!help` for more commands
 
+**Plugin**: vc.`channel`
+
+Almost same as `player` plugin but commands only works in Saved Messages,
+`!join` takes arguments to be able to join group or channel voice chats.
+
+**Plugin**: `ping` and `sysinfo`
+
+Commands only works for userbot account itself and its contacts.
+
 ## Requirements
 
 - Python 3.6 or higher
-- One or two Telegram accounts, better to have one for the userbot and another
-  one as a contact of the userbot account to control it
--
-A [Telegram API key](https://docs.pyrogram.org/intro/quickstart#enjoy-the-api)
-and a Telegram account
-- Choose plugins you need, install dependencies which listed above and
-  run `pip install -U -r requirements.txt` to install python package
-  dependencies as well
+- A
+  [Telegram API key](https://docs.pyrogram.org/intro/quickstart#enjoy-the-api)
+  and a Telegram account
+- Choose plugins you need, install dependencies which listed above and run
+  `pip install -U -r requirements.txt` to install Python package dependencies
+  as well
 - [FFmpeg](https://www.ffmpeg.org/)
 
 ## Run
@@ -112,7 +114,8 @@ plugins = dict(
     root="plugins",
     include=[
         "vc.player",
-        "ping"
+        "ping",
+        "sysinfo"
     ]
 )
 
@@ -124,24 +127,40 @@ app.stop()
 print('\n>>> USERBOT STOPPED')
 ```
 
+## Notes
+
+- Read module docstrings of [plugins/](plugins) you are going to use at the
+  beginning of the file for extra notes
+
+## Self-hosting
+
+This userbot should run fine on any cloud server. Popular choices of cloud
+server providers are DigitalOcean, Vultr and Hetzner. You can use one of the
+following referral links to sign up on Vultr to give the project author
+credits in case you want to try Vultr.
+
+<a href="https://www.vultr.com/?ref=7321667"><img src="https://www.vultr.com/media/banners/banner_728x90.png" width="728" height="90"></a>
+
+Or [Give100get25 - Vultr](https://www.vultr.com/?ref=8559837-6G)
+
 # License
 
 AGPL-3.0-or-later
 
 ```
-    tgvc-userbot, Telegram Voice Chat Userbot
-    Copyright (C) 2021  Dash Eclipse
+tgvc-userbot, Telegram Voice Chat Userbot
+Copyright (C) 2021  Dash Eclipse
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ```

@@ -15,27 +15,15 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-Play and Control Audio playing in Telegram Voice Chat
+Play and Control Audio playing in Telegram channels Voice Chat
 
 Dependencies:
 - ffmpeg
-
-Required group admin permissions:
-- Delete messages
-- Manage voice chats (optional)
-
-How to use:
-- Start the userbot
-- send !join to a voice chat enabled group chat
-  from userbot account itself or its contacts
-- reply to an audio with /play to start playing
-  it in the voice chat, every member of the group
-  can use the !play command now
-- check !help for more commands
 """
 import asyncio
 import os
 from datetime import datetime, timedelta
+from typing import Union
 
 # noinspection PyPackageRequirements
 import ffmpeg
@@ -48,22 +36,15 @@ DELETE_DELAY = 8
 DURATION_AUTOPLAY_MIN = 10
 DURATION_PLAY_HOUR = 3
 
-USERBOT_HELP = f"""{emoji.LABEL}  **Common Commands**:
-__available to group members of current voice chat__
-__starts with / (slash) or ! (exclamation mark)__
+USERBOT_HELP = f"""{emoji.LABEL}  **Commands**:
 
 \u2022 **/play**  reply with an audio to play/queue it, or show playlist
 \u2022 **/current**  show current playing time of current track
 \u2022 **/repo**  show git repository of the userbot
 \u2022 `!help`  show help for commands
 
-
-{emoji.LABEL}  **Admin Commands**:
-__available to userbot account itself and its contacts__
-__starts with ! (exclamation mark)__
-
-\u2022 `!skip` [n] ...  skip current or n where n >= 2
-\u2022 `!join`  join voice chat of current group
+\u2022 `!skip` `[n] ...`  skip current or n where n >= 2
+\u2022 `!join` `<channel> [join_as] [invite_hash]`  join group/channel VC
 \u2022 `!leave`  leave current voice chat
 \u2022 `!vc`  check which VC is joined
 \u2022 `!stop`  stop playing
@@ -82,31 +63,19 @@ USERBOT_REPO = f"""{emoji.ROBOT} **Telegram Voice Chat UserBot**
 
 # - Pyrogram filters
 
-main_filter = (filters.group
+# self_or_contact_pm_filter = filters.create(
+#     lambda _, __, m:
+#     m.chat and m.chat.type == "private"
+#     and m.from_user and (m.from_user.is_contact or m.from_user.is_self)
+# )
+
+main_filter = (filters.chat("me")
                & filters.text
                & ~filters.edited
                & ~filters.via_bot)
-self_or_contact_filter = filters.create(
-    lambda _, __, message:
-    (message.from_user and message.from_user.is_contact) or message.outgoing
-)
-
-
-async def current_vc_filter(_, __, m: Message):
-    group_call = mp.group_call
-    if not group_call.is_connected:
-        return False
-    chat_id = int("-100" + str(group_call.full_chat.id))
-    if m.chat.id == chat_id:
-        return True
-    return False
-
-
-current_vc = filters.create(current_vc_filter)
 
 
 # - class
-
 
 class MusicPlayer(object):
     def __init__(self):
@@ -137,7 +106,7 @@ class MusicPlayer(object):
             ])
         if mp.msg.get('playlist') is not None:
             await mp.msg['playlist'].delete()
-        mp.msg['playlist'] = await send_text(pl)
+        mp.msg['playlist'] = await mp.group_call.client.send_message("me", pl)
 
 
 mp = MusicPlayer()
@@ -150,10 +119,16 @@ mp = MusicPlayer()
 async def network_status_changed_handler(gc: GroupCall, is_connected: bool):
     if is_connected:
         mp.chat_id = int("-100" + str(gc.full_chat.id))
-        await send_text(f"{emoji.CHECK_MARK_BUTTON} joined the voice chat")
+        await mp.group_call.client.send_message(
+            "me",
+            f"{emoji.CHECK_MARK_BUTTON} joined the voice chat"
+        )
     else:
-        await send_text(f"{emoji.CROSS_MARK_BUTTON} left the voice chat")
         mp.chat_id = None
+        await mp.group_call.client.send_message(
+            "me",
+            f"{emoji.CROSS_MARK_BUTTON} left the voice chat"
+        )
 
 
 @mp.group_call.on_playout_ended
@@ -161,13 +136,61 @@ async def playout_ended_handler(_, __):
     await skip_current_playing()
 
 
-# - Pyrogram handlers
+# - Pyrogram handers
+
+@Client.on_message(main_filter
+                   & filters.command("join", prefixes="!"))
+async def join_voice_chat(client, m: Message):
+    command = m.command
+    len_command = len(command)
+    if 2 <= len_command <= 4:
+        channel = await get_id(command[1])
+        join_as = await get_id(command[2]) if len_command >= 3 else None
+        invite_hash = command[3] if len_command == 4 else None
+        group_call = mp.group_call
+        group_call.client = client
+        if group_call.is_connected:
+            text = f"{emoji.ROBOT} already joined a voice chat"
+        else:
+            await group_call.start(channel, join_as=join_as,
+                                   invite_hash=invite_hash)
+            # text = "Status will be sent to Saved Messages"
+            return
+    else:
+        text = "**Usage**: `!join <channel> [join_as] [invite_hash]`"
+    await m.reply_text(text, quote=True, parse_mode="md")
+
+
+@Client.on_message(main_filter
+                   & filters.regex("^!vc$"))
+async def list_voice_chat(client, m: Message):
+    group_call = mp.group_call
+    if group_call.is_connected:
+        chat_id = int("-100" + str(group_call.full_chat.id))
+        chat = await client.get_chat(chat_id)
+        await m.reply_text(
+            f"{emoji.MUSICAL_NOTES} **currently in the voice chat**:\n"
+            f"- **{chat.title}**",
+            quote=True
+        )
+    else:
+        await m.reply_text(f"{emoji.NO_ENTRY} didn't join any voice chat yet",
+                           quote=True)
+
+
+@Client.on_message(main_filter
+                   & filters.regex("^!leave$"))
+async def leave_voice_chat(_, m: Message):
+    group_call = mp.group_call
+    mp.playlist.clear()
+    group_call.input_filename = ''
+    await group_call.stop()
+    await m.delete()
 
 
 @Client.on_message(
-    filters.group
+    filters.chat("me")
     & ~filters.edited
-    & current_vc
     & (filters.regex("^(\\/|!)play$") | filters.audio)
 )
 async def play_track(client, m: Message):
@@ -179,7 +202,8 @@ async def play_track(client, m: Message):
             reply = await m.reply_text(
                 f"{emoji.ROBOT} audio which duration longer than "
                 f"{str(DURATION_AUTOPLAY_MIN)} min won't be automatically "
-                "added to playlist"
+                "added to playlist",
+                quote=True
             )
             await _delay_delete_messages((reply,), DELETE_DELAY)
             return
@@ -189,7 +213,8 @@ async def play_track(client, m: Message):
         if m_audio.audio.duration > (DURATION_PLAY_HOUR * 60 * 60):
             reply = await m.reply_text(
                 f"{emoji.ROBOT} audio which duration longer than "
-                f"{str(DURATION_PLAY_HOUR)} hours won't be added to playlist"
+                f"{str(DURATION_PLAY_HOUR)} hours won't be added to playlist",
+                quote=True
             )
             await _delay_delete_messages((reply,), DELETE_DELAY)
             return
@@ -200,14 +225,15 @@ async def play_track(client, m: Message):
     # check already added
     if playlist and playlist[-1].audio.file_unique_id \
             == m_audio.audio.file_unique_id:
-        reply = await m.reply_text(f"{emoji.ROBOT} already added")
+        reply = await m.reply_text(f"{emoji.ROBOT} already added", quote=True)
         await _delay_delete_messages((reply, m), DELETE_DELAY)
         return
     # add to playlist
     playlist.append(m_audio)
     if len(playlist) == 1:
         m_status = await m.reply_text(
-            f"{emoji.INBOX_TRAY} downloading and transcoding..."
+            f"{emoji.INBOX_TRAY} downloading and transcoding...",
+            quote=True
         )
         await download_audio(playlist[0])
         group_call.input_filename = os.path.join(
@@ -226,13 +252,12 @@ async def play_track(client, m: Message):
 
 
 @Client.on_message(main_filter
-                   & current_vc
                    & filters.regex("^(\\/|!)current$"))
 async def show_current_playing_time(_, m: Message):
     start_time = mp.start_time
     playlist = mp.playlist
     if not start_time:
-        reply = await m.reply_text(f"{emoji.PLAY_BUTTON} unknown")
+        reply = await m.reply_text(f"{emoji.PLAY_BUTTON} unknown", quote=True)
         await _delay_delete_messages((reply, m), DELETE_DELAY)
         return
     utcnow = datetime.utcnow().replace(microsecond=0)
@@ -241,24 +266,26 @@ async def show_current_playing_time(_, m: Message):
     mp.msg['current'] = await playlist[0].reply_text(
         f"{emoji.PLAY_BUTTON}  {utcnow - start_time} / "
         f"{timedelta(seconds=playlist[0].audio.duration)}",
+        quote=True,
         disable_notification=True
     )
     await m.delete()
 
 
 @Client.on_message(main_filter
-                   & (self_or_contact_filter | current_vc)
                    & filters.regex("^(\\/|!)help$"))
 async def show_help(_, m: Message):
     if mp.msg.get('help') is not None:
         await mp.msg['help'].delete()
-    mp.msg['help'] = await m.reply_text(USERBOT_HELP, quote=False)
+    mp.msg['help'] = await m.reply_text(
+        USERBOT_HELP,
+        quote=True,
+        parse_mode="md"
+    )
     await m.delete()
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.command("skip", prefixes="!"))
 async def skip_track(_, m: Message):
     playlist = mp.playlist
@@ -277,76 +304,30 @@ async def skip_track(_, m: Message):
                     text.append(f"{emoji.WASTEBASKET} {i}. **{audio}**")
                 else:
                     text.append(f"{emoji.CROSS_MARK} {i}")
-            reply = await m.reply_text(
-                "\n".join(text),
-                disable_web_page_preview=True
-            )
+            reply = await m.reply_text("\n".join(text), quote=True)
             await mp.send_playlist()
         except (ValueError, TypeError):
             reply = await m.reply_text(f"{emoji.NO_ENTRY} invalid input",
+                                       quote=True,
                                        disable_web_page_preview=True)
         await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & filters.regex("^!join$"))
-async def join_group_call(client, m: Message):
-    group_call = mp.group_call
-    group_call.client = client
-    if group_call.is_connected:
-        await m.reply_text(f"{emoji.ROBOT} already joined a voice chat")
-        return
-    await group_call.start(m.chat.id)
-    await m.delete()
-
-
-@Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
-                   & filters.regex("^!leave$"))
-async def leave_voice_chat(_, m: Message):
-    group_call = mp.group_call
-    mp.playlist.clear()
-    group_call.input_filename = ''
-    await group_call.stop()
-    await m.delete()
-
-
-@Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & filters.regex("^!vc$"))
-async def list_voice_chat(client, m: Message):
-    group_call = mp.group_call
-    if group_call.is_connected:
-        chat_id = int("-100" + str(group_call.full_chat.id))
-        chat = await client.get_chat(chat_id)
-        reply = await m.reply_text(
-            f"{emoji.MUSICAL_NOTES} **currently in the voice chat**:\n"
-            f"- **{chat.title}**"
-        )
-    else:
-        reply = await m.reply_text(emoji.NO_ENTRY
-                                   + "didn't join any voice chat yet")
-    await _delay_delete_messages((reply, m), DELETE_DELAY)
-
-
-@Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!stop$"))
 async def stop_playing(_, m: Message):
     group_call = mp.group_call
     group_call.stop_playout()
-    reply = await m.reply_text(f"{emoji.STOP_BUTTON} stopped playing")
+    reply = await m.reply_text(
+        f"{emoji.STOP_BUTTON} stopped playing",
+        quote=True
+    )
     await mp.update_start_time(reset=True)
     mp.playlist.clear()
     await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!replay$"))
 async def restart_playing(_, m: Message):
     group_call = mp.group_call
@@ -356,32 +337,29 @@ async def restart_playing(_, m: Message):
     await mp.update_start_time()
     reply = await m.reply_text(
         f"{emoji.COUNTERCLOCKWISE_ARROWS_BUTTON}  "
-        "playing from the beginning..."
+        "playing from the beginning...",
+        quote=True
     )
     await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!pause"))
 async def pause_playing(_, m: Message):
     mp.group_call.pause_playout()
     await mp.update_start_time(reset=True)
     reply = await m.reply_text(f"{emoji.PLAY_OR_PAUSE_BUTTON} paused",
-                               quote=False)
+                               quote=True)
     mp.msg['pause'] = reply
     await m.delete()
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!resume"))
 async def resume_playing(_, m: Message):
     mp.group_call.resume_playout()
     reply = await m.reply_text(f"{emoji.PLAY_OR_PAUSE_BUTTON} resumed",
-                               quote=False)
+                               quote=True)
     if mp.msg.get('pause') is not None:
         await mp.msg['pause'].delete()
     await m.delete()
@@ -389,8 +367,6 @@ async def resume_playing(_, m: Message):
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!clean$"))
 async def clean_raw_pcm(client, m: Message):
     download_dir = os.path.join(client.workdir, DEFAULT_DOWNLOAD_DIR)
@@ -405,34 +381,35 @@ async def clean_raw_pcm(client, m: Message):
             if fn.endswith(".raw"):
                 count += 1
                 os.remove(os.path.join(download_dir, fn))
-    reply = await m.reply_text(f"{emoji.WASTEBASKET} cleaned {count} files")
+    reply = await m.reply_text(
+        f"{emoji.WASTEBASKET} cleaned {count} files",
+        quote=True
+    )
     await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!mute$"))
 async def mute(_, m: Message):
     group_call = mp.group_call
     group_call.set_is_mute(True)
-    reply = await m.reply_text(f"{emoji.MUTED_SPEAKER} muted")
+    reply = await m.reply_text(f"{emoji.MUTED_SPEAKER} muted", quote=True)
     await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & self_or_contact_filter
-                   & current_vc
                    & filters.regex("^!unmute$"))
 async def unmute(_, m: Message):
     group_call = mp.group_call
     group_call.set_is_mute(False)
-    reply = await m.reply_text(f"{emoji.SPEAKER_MEDIUM_VOLUME} unmuted")
+    reply = await m.reply_text(
+        f"{emoji.SPEAKER_MEDIUM_VOLUME} unmuted",
+        quote=True
+    )
     await _delay_delete_messages((reply, m), DELETE_DELAY)
 
 
 @Client.on_message(main_filter
-                   & current_vc
                    & filters.regex("^(\\/|!)repo$"))
 async def show_repository(_, m: Message):
     if mp.msg.get('repo') is not None:
@@ -447,18 +424,8 @@ async def show_repository(_, m: Message):
 
 # - Other functions
 
-
-async def send_text(text):
-    group_call = mp.group_call
-    client = group_call.client
-    chat_id = mp.chat_id
-    message = await client.send_message(
-        chat_id,
-        text,
-        disable_web_page_preview=True,
-        disable_notification=True
-    )
-    return message
+async def get_id(channel: str) -> Union[str, int]:
+    return int(channel) if str.isdigit(channel) else channel
 
 
 async def skip_current_playing():
